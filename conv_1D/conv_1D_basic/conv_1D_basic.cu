@@ -1,7 +1,11 @@
 #include <stdio.h>
+#include <iostream>
+#include <chrono>
 #define INPUT_SIZE 1024
 #define KERNEL_SIZE 9
 #define OUTPUT_SIZE 1024
+using namespace std;
+using namespace chrono;
 __global__ void conv_1D_basic(float *kernel, float *in_data, float *out_data, int kernel_width, int data_width)
 {
     
@@ -15,6 +19,7 @@ __global__ void conv_1D_basic(float *kernel, float *in_data, float *out_data, in
     	if(N_start_point + j >= 0 && N_start_point + j < data_width)
     		Pvalue += in_data[N_start_point + j] * kernel[j];
     }
+    //printf("%lf\n",Pvalue);
     out_data[i] = Pvalue;
 }
 
@@ -42,7 +47,7 @@ int main()
     {
         kernel[i] = (float)(rand()%5);
     }
-
+	auto start = high_resolution_clock::now();
     cudaMemcpy(d_input_array, input_array, INPUT_SIZE*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_kernel, kernel, KERNEL_SIZE*sizeof(float), cudaMemcpyHostToDevice);
 
@@ -52,6 +57,7 @@ int main()
 	conv_1D_basic<<< blk_in_grid, thr_per_blk >>>(d_kernel, d_input_array, d_output_array, KERNEL_SIZE,INPUT_SIZE);
 
 	cudaMemcpy(output_array, d_output_array, OUTPUT_SIZE*sizeof(float), cudaMemcpyDeviceToHost);
+	auto end = high_resolution_clock::now();
 	for(int i=0; i<INPUT_SIZE; i++)
     {
     	
@@ -80,6 +86,8 @@ int main()
     cudaFree(d_kernel);
     cudaFree(d_output_array);
 
+    auto elapsed = duration_cast<microseconds>(end-start);
+    cout<<"elapsed time : "<<elapsed.count()<< " us "<<endl;
     printf("\n---------------------------\n");
     printf("__SUCCESS__\n");
     printf("---------------------------\n");
