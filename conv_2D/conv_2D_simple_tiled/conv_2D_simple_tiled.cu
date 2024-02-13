@@ -89,9 +89,6 @@ void conv_2D_seq(float **kernel, float **in_data, float **out_data, int kernel_w
                                         if(i_index >= 0 && i_index < data_width_y && j_index >= 0 && j_index < data_width_x)
 					{
                                                 Pvalue += in_data[i_index][j_index] * kernel[kernel_pix_i][kernel_pix_j];
-						if(out_pix_i == 0 && out_pix_j == 1024)
-					//	{
-							printf(" Pvalue += ref_in[%d][%d] * ref_kern[%d][%d] ---> %lf += %lf * %lf\n",i_index, j_index, kernel_pix_i, kernel_pix_j, Pvalue, in_data[i_index][j_index] , kernel[kernel_pix_i][kernel_pix_j]);
 			
 
 					}
@@ -116,7 +113,6 @@ int main()
 	//CUDA DEVICE MEMORY ALLOCATION
 	float *d_input_array, *d_output_array;
 	cudaMalloc(reinterpret_cast<void **>(&d_input_array), INPUT_SIZE_X*INPUT_SIZE_Y*sizeof(float));
-	//cudaMalloc(&d_kernel, KERNEL_SIZE_X*KERNEL_SIZE_Y*sizeof(float));
 	cudaMalloc(reinterpret_cast<void **>(&d_output_array), OUTPUT_SIZE_X*OUTPUT_SIZE_Y*sizeof(float));
 
 	//INPUT FOR SEQ PART
@@ -164,11 +160,8 @@ int main()
 
 
 	//SET CUDA DEVICE PARAMETARS
-	//dim3 blockDim(BLOCK_DIM_X,BLOCK_DIM_Y);
-	//dim3 gridDim(ceil(INPUT_SIZE_X/BLOCK_DIM_X), ceil(INPUT_SIZE_Y/BLOCK_DIM_Y));
 
 	dim3 blockDim(BLOCK_DIM_X,BLOCK_DIM_Y);
-	//dim3 gridDim(ceil(INPUT_SIZE_X/BLOCK_DIM_X), ceil(INPUT_SIZE_Y/BLOCK_DIM_Y));
 	dim3 gridDim(ceil((float)OUTPUT_SIZE_Y/(float)BLOCK_DIM_Y),ceil((float)OUTPUT_SIZE_X/(float)BLOCK_DIM_X));
 	//RUN CUDA KERNEL
 
@@ -239,9 +232,4 @@ int main()
 	printf("\n---------------------------\n");
 	printf("__SUCCESS__\n");
 	printf("---------------------------\n");
-	/*printf("N                 = %d\n", INPUT_SIZE);
-	printf("Threads Per Block = %d\n", thr_per_blk);
-	printf("Blocks In Grid    = %d\n", blk_in_grid);
-	printf("---------------------------\n\n");
-	*/
 }
