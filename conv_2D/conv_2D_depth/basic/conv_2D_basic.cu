@@ -1,0 +1,256 @@
+#include <stdio.h>
+#include <iostream>
+#include <chrono>
+#include <cuda_runtime.h>
+#define INPUT_SIZE_X 1024
+#define INPUT_SIZE_Y 1024
+#define INPUT_CHANNEL_SIZE 32
+#define INPUT_TOTAL_SIZE INPUT_CHANNEL_SIZE*INPUT_SIZE_X*INPUT_SIZE_Y
+
+#define KERNEL_SIZE_X 7
+#define KERNEL_SIZE_Y 7
+#define KERNEL_CHANNEL_SIZE 32
+#define KERNEL_TOTAL_SIZE KERNEL_SIZE_X*KERNEL_SIZE_Y*KERNEL_CHANNEL_SIZE
+
+#define OUTPUT_SIZE_X 1024
+#define OUTPUT_SIZE_Y 1024 
+#define OUTPUT_TOTAL_SIZE OUTPUT_SIZE_X*OUTPUT_SIZE_Y
+
+#define BLOCK_DIM_X 8
+#define BLOCK_DIM_Y 8
+#define GRID_DIM_X OUTPUT_SIZE_X/BLOCK_DIM_X
+#define GRID_DIM_Y OUTPUT_SIZE_Y/BLOCK_DIM_Y
+
+using namespace std;
+using namespace chrono;
+
+void conv_2D_seq(float ***kernel, float ***in_data, float **out_data, int kernel_width, int data_width_x, int data_width_y, int channel_size)
+{
+        float Pvalue = 0;
+        for(int out_pix_i = 0; out_pix_i<data_width_y; out_pix_i++ )
+        {
+
+                for(int out_pix_j = 0; out_pix_j<data_width_x; out_pix_j++ )
+                {
+                        Pvalue=0;
+                        for (int channel = 0; channel < channel_size; channel++)
+                        {
+                          
+                           for(int kernel_pix_i = 0; kernel_pix_i<kernel_width; kernel_pix_i++ )
+                            {
+
+                                for(int kernel_pix_j = 0; kernel_pix_j<kernel_width; kernel_pix_j++ )
+                                {
+                                    int i_index = out_pix_i - (kernel_width/2) + kernel_pix_i;
+                                    int j_index = out_pix_j - (kernel_width/2) + kernel_pix_j;
+                                    if(i_index >= 0 && i_index < data_width_y && j_index >= 0 && j_index < data_width_x)
+                                    {
+                                            Pvalue += in_data[channel][i_index][j_index] * kernel[channel][kernel_pix_i][kernel_pix_j];
+                                    }
+				                }		
+                            }
+                            out_data[out_pix_i][out_pix_j] = Pvalue; 
+                        }
+                        
+                        
+                }
+        }
+
+}
+
+
+__global__ void conv_2D_basic(float *kernel, float *in_data, float *out_data, int kernel_width, int data_width_x,int data_width_y,int channel_size)
+{
+    
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    float Pvalue = 0;
+    int N_start_point_i = i - (kernel_width/2);
+    int N_start_point_j = j - (kernel_width/2);
+
+    
+    for (int channel = 0; channel < channel_size; channel++)
+    {
+        for(int ki = 0; ki<kernel_width; ki++)
+        {
+            for(int kj = 0; kj<kernel_width; kj++)
+            {
+                int ni = N_start_point_i + ki;
+                int nj = N_start_point_j + kj;
+                if(ni>=0 && ni < data_width_y && nj>=0 && nj<data_width_x)
+                    Pvalue += in_data[channel*data_width_x*data_width_y + ni*data_width_x + nj] * kernel[channel*kernel_width*kernel_width + ki*kernel_width + kj];    
+            }
+        }
+    }
+    
+    
+
+    
+    out_data[i*data_width_x+j] = Pvalue;
+    //out_data[0] = 6;
+}
+
+
+
+
+int main()
+{
+	//HOST DEVICE MEMORY ALLOCATION
+	float *input_array  = (float*)malloc(INPUT_TOTAL_SIZE*sizeof(float));
+	float *kernel       = (float*)malloc(KERNEL_TOTAL_SIZE*sizeof(float));
+	float *output_array = (float*)malloc(OUTPUT_TOTAL_SIZE*sizeof(float));
+
+
+	//CUDA DEVICE MEMORY ALLOCATION
+	float *d_input_array, *d_kernel, *d_output_array;
+	cudaMalloc(reinterpret_cast<void **>(&d_input_array), INPUT_TOTAL_SIZE*sizeof(float));
+	cudaMalloc(reinterpret_cast<void **>(&d_kernel), KERNEL_TOTAL_SIZE*sizeof(float));
+	cudaMalloc(reinterpret_cast<void **>(&d_output_array), OUTPUT_TOTAL_SIZE*sizeof(float));
+	
+    //seq array
+    float ***seq_input = new float**[INPUT_CHANNEL_SIZE];
+    for (int i = 0; i < INPUT_CHANNEL_SIZE; i++)
+    {
+        seq_input[i] = new float*[INPUT_SIZE_Y];
+        for (int j = 0; j < INPUT_SIZE_Y; j++) 
+            seq_input[i][j] = new float[INPUT_SIZE_X];
+    
+    }
+    
+    
+	float ***seq_kernel = new float**[KERNEL_CHANNEL_SIZE];
+    for (int i = 0; i < KERNEL_CHANNEL_SIZE; i++)
+    {
+        seq_kernel[i] = new float*[KERNEL_SIZE_Y];
+        for (int j = 0; j < KERNEL_SIZE_Y; j++) 
+            seq_kernel[i][j] = new float[KERNEL_SIZE_X];
+    
+    }
+
+	float **seq_output = new float*[OUTPUT_SIZE_Y];
+    for (int i = 0; i < OUTPUT_SIZE_Y; i++) 
+    {
+        seq_output[i] = new float[OUTPUT_SIZE_X];
+    }
+	
+    //SET NUMBER FOR INPUT AND KERNEL ARRAY
+    for (int ch = 0; ch < INPUT_CHANNEL_SIZE; ch++)
+    {
+        for(int i=0; i<INPUT_SIZE_Y; i++)
+        {
+            for(int j=0; j<INPUT_SIZE_X; j++)
+            {
+                float a = (float)(rand()%10);
+                input_array[ch*INPUT_SIZE_X*INPUT_SIZE_Y + i*INPUT_SIZE_X + j] = a;
+                seq_input[ch][i][j] = a;
+            }
+        }
+
+    }
+    
+   for (int ch = 0; ch < KERNEL_CHANNEL_SIZE; ch++)
+   {
+        for(int i=0; i<KERNEL_SIZE_Y; i++)
+        {
+            for(int j=0; j<KERNEL_SIZE_X; j++)
+            {
+                float a = (float)(rand()%5);
+                kernel[ch*KERNEL_SIZE_X*KERNEL_SIZE_Y + i*KERNEL_SIZE_X + j] = a;
+                seq_kernel[ch][i][j] = a;
+            }   
+        }
+   }
+   
+    
+
+	auto start_d = high_resolution_clock::now();
+    //SEND VALUES OF KERNEL AND INPUT ARRAY TO CUDA DEVICE
+	cudaMemcpy(d_input_array, input_array, INPUT_TOTAL_SIZE*sizeof(float), cudaMemcpyHostToDevice); 
+	cudaMemcpy(d_kernel, kernel, KERNEL_TOTAL_SIZE*sizeof(float),cudaMemcpyHostToDevice);
+
+
+    
+    //SET CUDA DEVICE PARAMETARS
+	dim3 blockDim(BLOCK_DIM_X, BLOCK_DIM_Y);
+	dim3 gridDim(GRID_DIM_X, GRID_DIM_Y);
+
+    //RUN CUDA KERNEL
+
+	conv_2D_basic<<< gridDim,blockDim >>>(d_kernel, d_input_array, d_output_array, KERNEL_SIZE_X,INPUT_SIZE_X,INPUT_SIZE_X,INPUT_CHANNEL_SIZE);
+
+
+    //COPY CODE FROM CUDA DEVICE TO HOST DEVICE
+    cudaMemcpy(output_array, d_output_array, OUTPUT_SIZE_X*OUTPUT_SIZE_Y*sizeof(float), cudaMemcpyDeviceToHost); 
+    
+	auto end_d = high_resolution_clock::now();
+	
+    	
+    
+    auto start_h = high_resolution_clock::now();
+	conv_2D_seq(seq_kernel,seq_input,seq_output,KERNEL_SIZE_X, INPUT_SIZE_X, INPUT_SIZE_Y,INPUT_CHANNEL_SIZE);
+    auto end_h = high_resolution_clock::now();
+
+//        
+    for(int i=0; i < OUTPUT_SIZE_Y; i++)
+    {
+        for(int j=0; j < OUTPUT_SIZE_X; j++)
+        {
+            if(seq_output[i][j] != output_array[i*OUTPUT_SIZE_X + j])
+            {
+                printf("Calculation missmatch!!! \n");
+                printf("i = %d   j = %d\n",i,j);
+                printf("seq_output[%d][%d] != output_array[%d] ---> %lf != %lf\n", i, j, i*OUTPUT_SIZE_X + j,seq_output[i][j],output_array[i*OUTPUT_SIZE_X + j] );
+                return -1;
+            }
+        }
+    }
+
+    
+    cudaFree(d_input_array);
+    cudaFree(d_kernel);
+    cudaFree(d_output_array);
+
+    free(input_array);
+    free(kernel);
+    free(output_array);
+
+    for (int i = 0; i < OUTPUT_SIZE_Y; i++) 
+    {
+                free(seq_output[i]);
+    }
+
+    for (int i = 0; i < INPUT_CHANNEL_SIZE; i++)
+    {
+        for (int j = 0; j < INPUT_SIZE_Y; j++) 
+            free(seq_input[i][j]);
+        free(seq_input[i]);
+    }
+    free(seq_input);
+    
+    for (int i = 0; i < KERNEL_CHANNEL_SIZE; i++)
+    {
+        for (int j = 0; j < KERNEL_SIZE_Y; j++) 
+            free(seq_kernel[i][j]);
+        free(seq_kernel[i]);
+    }
+
+    free(seq_kernel);
+
+	auto elapsed_d = duration_cast<microseconds>(end_d - start_d);
+	auto elapsed_h = duration_cast<microseconds>(end_h - start_h);
+	float acc = (float)(elapsed_h.count())/(float)(elapsed_d.count());
+	cout<<"Elapesd CUDA device time : "<<elapsed_d.count()<<" us "<<endl;
+	cout<<"Elapesd HOST device time : "<<elapsed_h.count()<<" us "<<endl;
+	cout<<"Acceleration : "<<acc<<"x"<<endl;
+
+   // printf("GRID TIME : %lf ms\n\n",elapsed.count());
+    printf("\n---------------------------\n");
+    printf("__SUCCESS__\n");
+    printf("---------------------------\n");
+    /*printf("N                 = %d\n", INPUT_SIZE);
+    printf("Threads Per Block = %d\n", thr_per_blk);
+    printf("Blocks In Grid    = %d\n", blk_in_grid);
+    printf("---------------------------\n\n");
+    */
+}
